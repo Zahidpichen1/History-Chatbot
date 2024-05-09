@@ -1,78 +1,57 @@
 import streamlit as st
 from Functions.write_stream import user_data
-from langchain_community.llms import LlamaCpp
-from langchain.chains.conversation.memory import ConversationBufferWindowMemory
-from langchain.agents import initialize_agent, AgentType
-from langchain.tools import Tool, tool, DuckDuckGoSearchRun
-
-##############==============  BACKEND  ==============##############
-
-llm = LlamaCpp(
-    model_path="Model\mistral-7b-v0.1.Q5_K_S.gguf",
-    temperature=0,
-    max_tokens=3000,
-    n_ctx = 1100,
-    verbose = True
-    )
+from langchain.chains import LLMChain
+from langchain.memory import ConversationBufferMemory
+from langchain_core.prompts import PromptTemplate
+from langchain_cohere import ChatCohere
 
 
-conversational_memory = ConversationBufferWindowMemory(
-    memory_key='chat_history',
-    k=5,
-    return_messages=True,
+template = """You are a history assistant having a conversation with a curious child. Sadly you do not have any deep knowledge about things outside of history, when the child ask you any deep question that are not related to history. You kindly reply him by saying "Sorry, I am a history assistant, I do not have a deep knowledge about things that are not related to history. Please ask me history related question, I am happy to help!"
+
+{chat_history}
+Human: {human_input}
+Chatbot:"""
+
+prompt = PromptTemplate(
+    input_variables=["chat_history", "human_input"], template=template
+)
+memory = ConversationBufferMemory(memory_key="chat_history")
+
+chat_cohere = ChatCohere(model="command",temperature=0.6, cohere_api_key="TKhniHiOxRvqfbUKAOfpTV54mw1pnyRlPwdTgqh5")
+
+
+llm_chain = LLMChain(
+    llm=chat_cohere,
+    prompt=prompt,
+    verbose=True,
+    memory=memory,
 )
 
-search = DuckDuckGoSearchRun()
-
-stool = Tool.from_function(
-    func =search.run,
-    name = "Browzing",
-    description = "A useful search engine used only for topics related to history. Using this serach engine, it is possible to get latest news related to history topics"
-)
-
-tools = [stool]
 
 
-agent = initialize_agent(
-    tools=tools,
-    llm=llm,
-    agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
-    max_iterations=5,
-    verbose = True,
-    memory=conversational_memory
-)
 
-##############==============  UI(STREAMLIT APP)  ==============##############
 st.title("History Chatbot")
 
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-
 for message in st.session_state.messages:
-    with st.chat_message(message['role']):
-        st.markdown(message['content'])
-prompt = st.chat_input("Enter your message: ")
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+
+prompt = st.chat_input("What are your curious about...")
 
 if prompt:
     with st.chat_message("user"):
         st.write(prompt)
-    st.session_state.messages.append({'role':"user",'content':prompt})
 
-    output = agent(prompt)
-    response =  output['output']
-    flow = user_data(function_name= response)
+    st.session_state.messages.append({"role": "user", "content":prompt})
+
+    response = llm_chain.predict(human_input=prompt)
+    flow = user_data(function_name=response)
+
     with st.chat_message("assistant"):
-        st.write_stream(flow) 
+        st.write(flow)
+    st.session_state.messages.append({"role": "assistent", "content":response})
 
-    st.session_state.messages.append({'role':"assistant",'content': response})
-
-
-with st.sidebar:
-    New_Chat = st.button("New Chat", use_container_width=True)
-    if New_Chat:
-        # Delete all the items in Session state
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.session_state.messages = []  # Re-initialize the messages list
